@@ -65,6 +65,60 @@ func New(maxWorker int) *Dispatcher {
 	return dis
 }
 
+func (d *Dispatcher) UpScale(workerCount int) *Dispatcher {
+	diff := workerCount - len(d.workers)
+	for {
+		if diff == 0 {
+			break
+		}
+		d.workers = append(d.workers, &worker{
+			dis:        d,
+			kill:       make(chan struct{}, 1),
+			processing: false,
+			running:    false,
+		})
+		diff--
+	}
+	for i, w := range d.workers {
+		if d.running && !w.running {
+			d.workers[i].start(d.ctx)
+			d.workers[i].running = true
+		}
+	}
+	return d
+}
+
+func (d *Dispatcher) DownScale(workerCount int) *Dispatcher {
+	diff := len(d.workers) - workerCount
+	idx := 0
+	for {
+		if diff == 0 {
+			break
+		}
+		if !d.workers[idx].processing {
+			if d.running && d.workers[idx].running {
+				d.workers[idx].stop()
+			}
+			d.workers = append(d.workers[:idx], d.workers[idx:]...)
+			diff--
+		}
+		idx++
+		if idx == len(d.workers) {
+			idx = 0
+		}
+	}
+	return d
+}
+
+func (d *Dispatcher) AutoScale() *Dispatcher {
+	if len(d.workers) > d.workerCount {
+		d.DownScale(d.workerCount)
+	} else if len(d.workers) < d.workerCount {
+		d.UpScale(d.workerCount)
+	}
+	return d
+}
+
 func (d *Dispatcher) StartWorkerObserver() *Dispatcher {
 	go func() {
 		for {
@@ -72,46 +126,7 @@ func (d *Dispatcher) StartWorkerObserver() *Dispatcher {
 			case <-d.ctx.Done():
 				return
 			default:
-				if len(d.workers) > d.workerCount {
-					diff := len(d.workers) - d.workerCount
-					idx := 0
-					for {
-						if !d.workers[idx].processing {
-							if d.running && d.workers[idx].running {
-								d.workers[idx].stop()
-							}
-							d.workers = append(d.workers[:idx], d.workers[idx:]...)
-							diff--
-							if diff == 0 {
-								break
-							}
-						}
-						idx++
-						if idx == len(d.workers) {
-							idx = 0
-						}
-					}
-				} else if len(d.workers) < d.workerCount {
-					diff := d.workerCount - len(d.workers)
-					for {
-						d.workers = append(d.workers, &worker{
-							dis:        d,
-							kill:       make(chan struct{}, 1),
-							processing: false,
-							running:    false,
-						})
-						diff--
-						if diff == 0 {
-							break
-						}
-					}
-					for i, w := range d.workers {
-						if d.running && !w.running {
-							d.workers[i].start(d.ctx)
-							d.workers[i].running = true
-						}
-					}
-				}
+				d.AutoScale()
 			}
 		}
 	}()
@@ -185,15 +200,19 @@ func (w *worker) start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case job := <-w.dis.queue:
-				if job != nil {
-					w.processing = true
-					job()
-					w.dis.wg.Done()
-					w.processing = false
-				}
+				w.run(job)
 			}
 		}
 	}()
+}
+
+func (w *worker) run(job func()) {
+	if job != nil {
+		w.processing = true
+		job()
+		w.dis.wg.Done()
+		w.processing = false
+	}
 }
 
 func (w *worker) stop() {
