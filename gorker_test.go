@@ -25,7 +25,11 @@ func Test_GospatchWorker(t *testing.T) {
 
 	time.Sleep(time.Second * 10)
 
-	gorker.Get(20)
+	gorker.Get(200)
+
+	time.Sleep(time.Second * 5)
+
+	dispatcher.Stop(true)
 
 	dispatcher.Wait()
 }

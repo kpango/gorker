@@ -166,6 +166,7 @@ func (d *Dispatcher) Stop(immediately bool) *Dispatcher {
 	if !immediately {
 		d.wg.Wait()
 	}
+
 	d.cancel()
 	close(d.queue)
 
@@ -184,10 +185,12 @@ func (w *worker) start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case job := <-w.dis.queue:
-				w.processing = true
-				job()
-				w.dis.wg.Done()
-				w.processing = false
+				if job != nil {
+					w.processing = true
+					job()
+					w.dis.wg.Done()
+					w.processing = false
+				}
 			}
 		}
 	}()
