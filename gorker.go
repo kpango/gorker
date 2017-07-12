@@ -7,6 +7,7 @@ import (
 
 type Dispatcher struct {
 	running     bool
+	scaling     bool
 	queue       chan func()
 	wg          *sync.WaitGroup
 	mu          *sync.Mutex
@@ -37,10 +38,16 @@ func GetInstance() *Dispatcher {
 }
 
 func Get(maxWorker int) *Dispatcher {
+	if maxWorker < 1 {
+		maxWorker = 1
+	}
 	once.Do(func() {
 		instance = New(maxWorker)
 	})
 	instance.workerCount = maxWorker
+	if len(instance.workers) != maxWorker {
+		instance.AutoScale()
+	}
 	return instance
 }
 
@@ -73,6 +80,14 @@ func newDispatcher(maxWorker int) *Dispatcher {
 	}
 }
 
+func (d *Dispatcher) GetCurrentWorkerCount() int {
+	for {
+		if !d.scaling && len(d.workers) == d.workerCount {
+			return len(d.workers)
+		}
+	}
+}
+
 func (d *Dispatcher) SetQueueSize(size int) *Dispatcher {
 	old := d.queue
 	d.queue = make(chan func(), size)
@@ -90,6 +105,7 @@ func UpScale(workerCount int) *Dispatcher {
 
 func (d *Dispatcher) UpScale(workerCount int) *Dispatcher {
 	d.mu.Lock()
+	d.scaling = true
 	diff := workerCount - len(d.workers)
 	for {
 		if diff < 1 {
@@ -107,6 +123,7 @@ func (d *Dispatcher) UpScale(workerCount int) *Dispatcher {
 	if d.running {
 		d.Start()
 	}
+	d.scaling = false
 	return d
 }
 
@@ -116,6 +133,7 @@ func DownScale(workerCount int) *Dispatcher {
 
 func (d *Dispatcher) DownScale(workerCount int) *Dispatcher {
 	d.mu.Lock()
+	d.scaling = true
 	diff := len(d.workers) - workerCount
 	idx := 0
 	for {
@@ -133,6 +151,7 @@ func (d *Dispatcher) DownScale(workerCount int) *Dispatcher {
 		}
 	}
 	d.workerCount = workerCount
+	d.scaling = false
 	d.mu.Unlock()
 	return d
 }
@@ -175,14 +194,30 @@ func (d *Dispatcher) StartWorkerObserver() *Dispatcher {
 	return d
 }
 
-func Reset(workerCount int) *Dispatcher {
-	return instance.Reset(workerCount)
+func Reset() *Dispatcher {
+	instance = instance.Reset()
+	return instance
 }
 
-func (d *Dispatcher) Reset(workerCount int) *Dispatcher {
-	d.Stop(false)
-	d = New(workerCount)
+func (d *Dispatcher) Reset() *Dispatcher {
+	d.Stop(true)
+	d = New(d.workerCount)
 	return d
+}
+
+func SafeReset() *Dispatcher {
+	instance = instance.SafeReset()
+	return instance
+}
+
+func (d *Dispatcher) SafeReset() *Dispatcher {
+	for {
+		if !d.scaling {
+			d.Stop(true)
+			d = New(d.workerCount)
+			return d
+		}
+	}
 }
 
 func StartWithContext(c context.Context) *Dispatcher {
