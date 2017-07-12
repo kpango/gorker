@@ -9,6 +9,7 @@ type Dispatcher struct {
 	running     bool
 	queue       chan func()
 	wg          *sync.WaitGroup
+	mu          *sync.Mutex
 	workerCount int
 	workers     []*worker
 	ctx         context.Context
@@ -16,10 +17,9 @@ type Dispatcher struct {
 }
 
 type worker struct {
-	dis        *Dispatcher
-	kill       chan struct{}
-	processing bool
-	running    bool
+	dis     *Dispatcher
+	kill    chan struct{}
+	running bool
 }
 
 var (
@@ -27,6 +27,10 @@ var (
 	instance      *Dispatcher
 	once          sync.Once
 )
+
+func init() {
+	instance = New(defaultWorker)
+}
 
 func GetInstance() *Dispatcher {
 	return Get(defaultWorker)
@@ -44,79 +48,115 @@ func New(maxWorker int) *Dispatcher {
 	if maxWorker < 1 {
 		maxWorker = 1
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	dis := &Dispatcher{
-		running:     false,
-		workerCount: maxWorker,
-		queue:       make(chan func(), maxWorker*1000),
-		wg:          new(sync.WaitGroup),
-		workers:     make([]*worker, maxWorker),
-		ctx:         ctx,
-		cancel:      cancel,
-	}
-	for i := 0; i < maxWorker; i++ {
+	dis := newDispatcher(maxWorker)
+	for i := range dis.workers {
 		dis.workers[i] = &worker{
-			dis:        dis,
-			kill:       make(chan struct{}, 1),
-			processing: false,
-			running:    false,
+			dis:     dis,
+			kill:    make(chan struct{}, 1),
+			running: false,
 		}
 	}
 	return dis
 }
 
+func newDispatcher(maxWorker int) *Dispatcher {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Dispatcher{
+		running:     false,
+		workerCount: maxWorker,
+		queue:       make(chan func(), 100000),
+		wg:          new(sync.WaitGroup),
+		mu:          new(sync.Mutex),
+		workers:     make([]*worker, maxWorker),
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+}
+
+func (d *Dispatcher) SetQueueSize(size int) *Dispatcher {
+	old := d.queue
+	d.queue = make(chan func(), size)
+	go func() {
+		for job := range old {
+			d.queue <- job
+		}
+	}()
+	return d
+}
+
+func UpScale(workerCount int) *Dispatcher {
+	return instance.UpScale(workerCount)
+}
+
 func (d *Dispatcher) UpScale(workerCount int) *Dispatcher {
+	d.mu.Lock()
 	diff := workerCount - len(d.workers)
 	for {
-		if diff == 0 {
+		if diff < 1 {
 			break
 		}
 		d.workers = append(d.workers, &worker{
-			dis:        d,
-			kill:       make(chan struct{}, 1),
-			processing: false,
-			running:    false,
+			dis:     d,
+			kill:    make(chan struct{}, 1),
+			running: false,
 		})
 		diff--
 	}
-	for i, w := range d.workers {
-		if d.running && !w.running {
-			d.workers[i].start(d.ctx)
-			d.workers[i].running = true
-		}
+	d.workerCount = workerCount
+	d.mu.Unlock()
+	if d.running {
+		d.Start()
 	}
 	return d
+}
+
+func DownScale(workerCount int) *Dispatcher {
+	return instance.DownScale(workerCount)
 }
 
 func (d *Dispatcher) DownScale(workerCount int) *Dispatcher {
+	d.mu.Lock()
 	diff := len(d.workers) - workerCount
 	idx := 0
 	for {
-		if diff == 0 {
+		if diff < 1 {
 			break
 		}
-		if !d.workers[idx].processing {
-			if d.running && d.workers[idx].running {
-				d.workers[idx].stop()
-			}
-			d.workers = append(d.workers[:idx], d.workers[idx:]...)
-			diff--
+		if d.running && d.workers[idx].running {
+			d.workers[idx].stop()
 		}
+		d.workers = append(d.workers[:idx], d.workers[idx+1:]...)
+		diff--
 		idx++
-		if idx == len(d.workers) {
+		if idx >= len(d.workers) {
 			idx = 0
 		}
+	}
+	d.workerCount = workerCount
+	d.mu.Unlock()
+	return d
+}
+
+func AutoScale() *Dispatcher {
+	return instance.AutoScale()
+}
+
+func (d *Dispatcher) AutoScale() *Dispatcher {
+	d.mu.Lock()
+	if len(d.workers) > d.workerCount {
+		d.mu.Unlock()
+		d.DownScale(d.workerCount)
+	} else if len(d.workers) < d.workerCount {
+		d.mu.Unlock()
+		d.UpScale(d.workerCount)
+	} else {
+		d.mu.Unlock()
 	}
 	return d
 }
 
-func (d *Dispatcher) AutoScale() *Dispatcher {
-	if len(d.workers) > d.workerCount {
-		d.DownScale(d.workerCount)
-	} else if len(d.workers) < d.workerCount {
-		d.UpScale(d.workerCount)
-	}
-	return d
+func StartWorkerObserver() *Dispatcher {
+	return instance.StartWorkerObserver()
 }
 
 func (d *Dispatcher) StartWorkerObserver() *Dispatcher {
@@ -126,17 +166,27 @@ func (d *Dispatcher) StartWorkerObserver() *Dispatcher {
 			case <-d.ctx.Done():
 				return
 			default:
-				d.AutoScale()
+				if d.workerCount != len(d.workers) {
+					d.AutoScale()
+				}
 			}
 		}
 	}()
 	return d
 }
 
+func Reset(workerCount int) *Dispatcher {
+	return instance.Reset(workerCount)
+}
+
 func (d *Dispatcher) Reset(workerCount int) *Dispatcher {
 	d.Stop(false)
 	d = New(workerCount)
 	return d
+}
+
+func StartWithContext(c context.Context) *Dispatcher {
+	return instance.StartWithContext(c)
 }
 
 func (d *Dispatcher) StartWithContext(c context.Context) *Dispatcher {
@@ -150,12 +200,23 @@ func (d *Dispatcher) StartWithContext(c context.Context) *Dispatcher {
 	return d
 }
 
+func Start() *Dispatcher {
+	return instance.Start()
+}
+
 func (d *Dispatcher) Start() *Dispatcher {
-	for _, worker := range d.workers {
-		worker.start(d.ctx)
+	for i, w := range d.workers {
+		if !w.running {
+			d.workers[i].start(d.ctx)
+			d.workers[i].running = true
+		}
 	}
 	d.running = true
 	return d
+}
+
+func Add(job func() error) chan error {
+	return instance.Add(job)
 }
 
 func (d *Dispatcher) Add(job func() error) chan error {
@@ -167,10 +228,18 @@ func (d *Dispatcher) Add(job func() error) chan error {
 	return ech
 }
 
+func Wait() {
+	instance.Wait()
+}
+
 func (d *Dispatcher) Wait() {
 	if d.running {
 		d.wg.Wait()
 	}
+}
+
+func Stop(immediately bool) *Dispatcher {
+	return instance.Stop(immediately)
 }
 
 func (d *Dispatcher) Stop(immediately bool) *Dispatcher {
@@ -179,11 +248,10 @@ func (d *Dispatcher) Stop(immediately bool) *Dispatcher {
 	}
 
 	if !immediately {
-		d.wg.Wait()
+		d.Wait()
 	}
 
 	d.cancel()
-	close(d.queue)
 
 	d.running = false
 	d = New(len(d.workers))
@@ -208,10 +276,8 @@ func (w *worker) start(ctx context.Context) {
 
 func (w *worker) run(job func()) {
 	if job != nil {
-		w.processing = true
 		job()
 		w.dis.wg.Done()
-		w.processing = false
 	}
 }
 
