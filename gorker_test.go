@@ -163,105 +163,27 @@ func TestNew(t *testing.T) {
 }
 
 func Test_newDispatcher(t *testing.T) {
-	type args struct {
-		maxWorker int
+	ins1 := newDispatcher(defaultWorker)
+	ins2 := newDispatcher(defaultWorker)
+
+	if ins1.workerCount != ins2.workerCount {
+		t.Errorf("got = %v, want = %v", ins1.workerCount, ins2.workerCount)
 	}
-	tests := []struct {
-		name string
-		args args
-		want *Dispatcher
-	}{
-	// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := newDispatcher(tt.args.maxWorker); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("newDispatcher() = %v, want %v", got, tt.want)
-			}
-		})
+
+	if len(ins1.workers) != len(ins2.workers) {
+		t.Errorf("worker length is %v, wnat length = %v", len(ins1.workers), len(ins2.workers))
 	}
 }
 
-func TestDispatcher_GetCurrentWorkerCount(t *testing.T) {
-	type fields struct {
-		running     bool
-		scaling     bool
-		queue       chan func()
-		wg          *sync.WaitGroup
-		mu          *sync.Mutex
-		workerCount int
-		workers     []*worker
-		ctx         context.Context
-		cancel      context.CancelFunc
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   int
-	}{
-	// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := &Dispatcher{
-				running:     tt.fields.running,
-				scaling:     tt.fields.scaling,
-				queue:       tt.fields.queue,
-				wg:          tt.fields.wg,
-				mu:          tt.fields.mu,
-				workerCount: tt.fields.workerCount,
-				workers:     tt.fields.workers,
-				ctx:         tt.fields.ctx,
-				cancel:      tt.fields.cancel,
-			}
-			if got := d.GetCurrentWorkerCount(); got != tt.want {
-				t.Errorf("Dispatcher.GetCurrentWorkerCount() = %v, want %v", got, tt.want)
-			}
-		})
+func TestDispatcher_GetWorkerCount(t *testing.T) {
+	got := Get(10)
+
+	if got.workerCount != got.GetWorkerCount() {
+		t.Error("invalid worker count")
 	}
 }
 
 func TestDispatcher_SetQueueSize(t *testing.T) {
-	type fields struct {
-		running     bool
-		scaling     bool
-		queue       chan func()
-		wg          *sync.WaitGroup
-		mu          *sync.Mutex
-		workerCount int
-		workers     []*worker
-		ctx         context.Context
-		cancel      context.CancelFunc
-	}
-	type args struct {
-		size int
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-		want   *Dispatcher
-	}{
-	// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := &Dispatcher{
-				running:     tt.fields.running,
-				scaling:     tt.fields.scaling,
-				queue:       tt.fields.queue,
-				wg:          tt.fields.wg,
-				mu:          tt.fields.mu,
-				workerCount: tt.fields.workerCount,
-				workers:     tt.fields.workers,
-				ctx:         tt.fields.ctx,
-				cancel:      tt.fields.cancel,
-			}
-			if got := d.SetQueueSize(tt.args.size); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Dispatcher.SetQueueSize() = %v, want %v", got, tt.want)
-			}
-		})
-	}
 }
 
 func TestUpScale(t *testing.T) {

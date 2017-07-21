@@ -1,8 +1,11 @@
 GO_VERSION:=$(shell go version)
 
-.PHONY: bench profile
+.PHONY: bench profile test build
 
 all: install
+
+test:
+	go test -v
 
 bench:
 	go test -count=5 -run=NONE -bench . -benchmem

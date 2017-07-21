@@ -8,7 +8,9 @@ import (
 type Dispatcher struct {
 	running     bool
 	scaling     bool
+	resizing    bool
 	queue       chan func()
+	queueSize   int
 	wg          *sync.WaitGroup
 	mu          *sync.Mutex
 	workerCount int
@@ -68,10 +70,12 @@ func New(maxWorker int) *Dispatcher {
 
 func newDispatcher(maxWorker int) *Dispatcher {
 	ctx, cancel := context.WithCancel(context.Background())
+	qs := 100000
 	return &Dispatcher{
 		running:     false,
 		workerCount: maxWorker,
-		queue:       make(chan func(), 100000),
+		queue:       make(chan func(), qs),
+		queueSize:   qs,
 		wg:          new(sync.WaitGroup),
 		mu:          new(sync.Mutex),
 		workers:     make([]*worker, maxWorker),
@@ -80,10 +84,23 @@ func newDispatcher(maxWorker int) *Dispatcher {
 	}
 }
 
-func (d *Dispatcher) GetCurrentWorkerCount() int {
+func GetWorkerCount() int {
+	return instance.GetWorkerCount()
+}
+
+// GetWorkerCount returns current worker count this function will be blocking while worker scaling
+func (d *Dispatcher) GetWorkerCount() int {
 	for {
 		if !d.scaling && len(d.workers) == d.workerCount {
 			return len(d.workers)
+		}
+	}
+}
+
+func (d *Dispatcher) GetQueueSize() int {
+	for {
+		if !d.resizing {
+			return d.queueSize
 		}
 	}
 }
@@ -92,9 +109,11 @@ func (d *Dispatcher) SetQueueSize(size int) *Dispatcher {
 	old := d.queue
 	d.queue = make(chan func(), size)
 	go func() {
+		d.resizing = true
 		for job := range old {
 			d.queue <- job
 		}
+		d.resizing = false
 	}()
 	return d
 }
