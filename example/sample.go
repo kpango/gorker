@@ -2,17 +2,13 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"runtime"
-	"runtime/trace"
 	"time"
 
 	"github.com/kpango/gorker"
 )
 
 func main() {
-	trace.Start(os.Stdout)
-
 	dispatcher := gorker.Get(3)
 	dispatcher.StartWorkerObserver()
 
@@ -50,10 +46,6 @@ func main() {
 	})
 
 	gorker.UpScale(200)
-	time.Sleep(time.Second * 5)
 
-	dispatcher.Stop(true)
-
-	dispatcher.Wait()
-	trace.Stop()
+	dispatcher.Stop(false)
 }
