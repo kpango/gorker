@@ -233,15 +233,10 @@ func SafeReset() *Dispatcher {
 
 func (d *Dispatcher) SafeReset() *Dispatcher {
 	for {
-		select {
-		case <-d.ctx.Done():
+		if !d.scaling {
+			d.Stop(true)
+			d = New(d.workerCount)
 			return d
-		default:
-			if !d.scaling {
-				d.Stop(true)
-				d = New(d.workerCount)
-				return d
-			}
 		}
 	}
 }
@@ -254,8 +249,10 @@ func (d *Dispatcher) StartWithContext(c context.Context) *Dispatcher {
 	ctx, cancel := context.WithCancel(c)
 	d.ctx = ctx
 	d.cancel = cancel
-	for _, worker := range d.workers {
-		worker.start(d.ctx)
+	for i, w := range d.workers {
+		if !w.running {
+			d.workers[i].start(d.ctx)
+		}
 	}
 	d.running = true
 	return d
@@ -269,7 +266,6 @@ func (d *Dispatcher) Start() *Dispatcher {
 	for i, w := range d.workers {
 		if !w.running {
 			d.workers[i].start(d.ctx)
-			d.workers[i].running = true
 		}
 	}
 	d.running = true
@@ -325,8 +321,10 @@ func (w *worker) start(ctx context.Context) {
 		for {
 			select {
 			case <-w.kill:
+				w.running = false
 				return
 			case <-ctx.Done():
+				w.running = false
 				return
 			case job := <-w.dis.queue:
 				w.run(job)
