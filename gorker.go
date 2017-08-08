@@ -204,7 +204,7 @@ func (d *Dispatcher) StartWorkerObserver() *Dispatcher {
 			case <-d.ctx.Done():
 				return
 			default:
-				if d.workerCount != len(d.workers) {
+				if d.workerCount != len(d.workers) && !d.scaling {
 					d.AutoScale()
 				}
 			}
