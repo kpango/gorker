@@ -108,12 +108,14 @@ func (d *Dispatcher) GetQueueSize() int {
 func (d *Dispatcher) SetQueueSize(size int) *Dispatcher {
 	old := d.queue
 	d.queue = make(chan func(), size)
+	d.wg.Add(1)
 	go func() {
 		d.resizing = true
 		for job := range old {
 			d.queue <- job
 		}
 		d.resizing = false
+		d.wg.Done()
 	}()
 	return d
 }
@@ -231,10 +233,15 @@ func SafeReset() *Dispatcher {
 
 func (d *Dispatcher) SafeReset() *Dispatcher {
 	for {
-		if !d.scaling {
-			d.Stop(true)
-			d = New(d.workerCount)
+		select {
+		case <-d.ctx.Done():
 			return d
+		default:
+			if !d.scaling {
+				d.Stop(true)
+				d = New(d.workerCount)
+				return d
+			}
 		}
 	}
 }

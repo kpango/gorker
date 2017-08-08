@@ -75,20 +75,17 @@ func TestGet(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Get() = %v, want %v", got, tt.want)
 			}
+			got.Start()
+			if !got.running {
+				t.Error("worker is not running")
+			}
 			if got.workerCount != tt.maxWorker {
 				t.Errorf("workerCount = %v, want %v", got.workerCount, tt.maxWorker)
 			}
 			if len(got.workers) != tt.maxWorker {
 				t.Errorf("worker length = %v, want %v", len(got.workers), tt.maxWorker)
 			}
-			if got.running {
-				t.Error("worker is running")
-			}
-			got.Start()
-			if !got.running {
-				t.Error("worker is not running")
-			}
-			got.Stop(true)
+			got.Stop(false)
 			if got.running {
 				t.Error("worker is running")
 			}
@@ -179,6 +176,7 @@ func TestDispatcher_GetWorkerCount(t *testing.T) {
 	got := Get(10)
 
 	if got.workerCount != got.GetWorkerCount() {
+		t.Error(got.GetWorkerCount())
 		t.Error("invalid worker count")
 	}
 }
