@@ -321,10 +321,8 @@ func (w *worker) start(ctx context.Context) {
 		for {
 			select {
 			case <-w.kill:
-				w.running = false
 				return
 			case <-ctx.Done():
-				w.running = false
 				return
 			case job := <-w.dis.queue:
 				w.run(job)
