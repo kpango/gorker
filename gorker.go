@@ -9,8 +9,9 @@ type Dispatcher struct {
 	running     bool
 	scaling     bool
 	resizing    bool
-	queue       chan func()
-	queueSize   int
+	queue       []func()
+	qin         chan func()
+	qout        chan func()
 	wg          *sync.WaitGroup
 	mu          *sync.Mutex
 	workerCount int
@@ -74,14 +75,36 @@ func newDispatcher(maxWorker int) *Dispatcher {
 	return &Dispatcher{
 		running:     false,
 		workerCount: maxWorker,
-		queue:       make(chan func(), qs),
-		queueSize:   qs,
+		queue:       make([]func(), 0, qs),
+		qin:         make(chan func(), qs),
+		qout:        make(chan func(), qs),
 		wg:          new(sync.WaitGroup),
 		mu:          new(sync.Mutex),
 		workers:     make([]*worker, maxWorker),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+}
+
+func (d *Dispatcher) QueueRunner() *Dispatcher {
+	go func() {
+		var job func()
+		for {
+			select {
+			case <-d.ctx.Done():
+				return
+			case job = <-d.qin:
+				d.queue = append(d.queue, job)
+			}
+			if len(d.queue) > 0 {
+				select {
+				case d.qout <- d.queue[0]:
+					d.queue = d.queue[1:]
+				}
+			}
+		}
+	}()
+	return d
 }
 
 func GetWorkerCount() int {
@@ -95,29 +118,6 @@ func (d *Dispatcher) GetWorkerCount() int {
 			return len(d.workers)
 		}
 	}
-}
-
-func (d *Dispatcher) GetQueueSize() int {
-	for {
-		if !d.resizing {
-			return d.queueSize
-		}
-	}
-}
-
-func (d *Dispatcher) SetQueueSize(size int) *Dispatcher {
-	old := d.queue
-	d.queue = make(chan func(), size)
-	d.wg.Add(1)
-	go func() {
-		d.resizing = true
-		for job := range old {
-			d.queue <- job
-		}
-		d.resizing = false
-		d.wg.Done()
-	}()
-	return d
 }
 
 func UpScale(workerCount int) *Dispatcher {
@@ -279,7 +279,7 @@ func Add(job func() error) chan error {
 func (d *Dispatcher) Add(job func() error) chan error {
 	d.wg.Add(1)
 	ech := make(chan error, 1)
-	d.queue <- func() {
+	d.qin <- func() {
 		ech <- job()
 	}
 	return ech
@@ -324,7 +324,7 @@ func (w *worker) start(ctx context.Context) {
 				return
 			case <-ctx.Done():
 				return
-			case job := <-w.dis.queue:
+			case job := <-w.dis.qout:
 				w.run(job)
 			}
 		}

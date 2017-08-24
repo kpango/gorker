@@ -9,18 +9,19 @@ import (
 )
 
 func main() {
-	dispatcher := gorker.Get(3)
-	dispatcher.StartWorkerObserver()
+	dispatcher := gorker.Get(3).StartWorkerObserver().QueueRunner()
 
-	for i := 0; i < 10000; i++ {
-		func(n int) {
-			dispatcher.Add(func() error {
-				fmt.Printf("%03d:\t workers: %d\t%v\n", n, runtime.NumGoroutine()-2, time.Now().Format(time.RFC3339))
-				time.Sleep(time.Millisecond * 10)
-				return nil
-			})
-		}(i)
-	}
+	go func() {
+		for i := 0; i < 10000000; i++ {
+			func(n int) {
+				dispatcher.Add(func() error {
+					fmt.Printf("%03d:\t workers: %d\t%v\n", n, runtime.NumGoroutine()-2, time.Now().Format(time.RFC3339))
+					time.Sleep(time.Millisecond * 10)
+					return nil
+				})
+			}(i)
+		}
+	}()
 
 	dispatcher.Start()
 
@@ -46,6 +47,10 @@ func main() {
 	})
 
 	gorker.UpScale(200)
+
+	time.Sleep(10 * time.Second)
+
+	gorker.UpScale(2000)
 
 	dispatcher.Stop(false)
 }
