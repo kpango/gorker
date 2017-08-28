@@ -2,6 +2,7 @@ package gorker
 
 import (
 	"context"
+	"math"
 	"sync"
 )
 
@@ -27,9 +28,10 @@ type worker struct {
 }
 
 var (
-	defaultWorker = 3
-	instance      *Dispatcher
-	once          sync.Once
+	defaultWorker   = 3
+	bufferSizeLimit = 1000000.0
+	instance        *Dispatcher
+	once            sync.Once
 )
 
 func init() {
@@ -76,8 +78,8 @@ func newDispatcher(maxWorker int) *Dispatcher {
 		running:     false,
 		workerCount: maxWorker,
 		queue:       make([]func(), 0, qs),
-		qin:         make(chan func(), qs),
-		qout:        make(chan func(), qs),
+		qin:         make(chan func(), int(math.Min(float64(maxWorker*100), bufferSizeLimit))),
+		qout:        make(chan func(), int(math.Min(float64(maxWorker*100), bufferSizeLimit))),
 		wg:          new(sync.WaitGroup),
 		mu:          new(sync.Mutex),
 		workers:     make([]*worker, maxWorker),
@@ -94,12 +96,16 @@ func (d *Dispatcher) QueueRunner() *Dispatcher {
 			case <-d.ctx.Done():
 				return
 			case job = <-d.qin:
+				d.mu.Lock()
 				d.queue = append(d.queue, job)
+				d.mu.Unlock()
 			}
 			if len(d.queue) > 0 {
 				select {
 				case d.qout <- d.queue[0]:
+					d.mu.Lock()
 					d.queue = d.queue[1:]
+					d.mu.Unlock()
 				}
 			}
 		}
@@ -124,7 +130,41 @@ func UpScale(workerCount int) *Dispatcher {
 	return instance.UpScale(workerCount)
 }
 
+func (d *Dispatcher) ScaleBuffer(size int) *Dispatcher {
+	size = int(math.Min(float64(size*100), bufferSizeLimit))
+	d.mu.Lock()
+	oldin := d.qin
+	oldout := d.qout
+	d.qin = make(chan func(), size)
+	d.qout = make(chan func(), size)
+	d.mu.Unlock()
+	d.wg.Add(1)
+	go func() {
+		tmpQueue := make([]func(), 0, len(oldin))
+		for job := range oldin {
+			tmpQueue = append(tmpQueue, job)
+		}
+		d.mu.Lock()
+		d.queue = append(d.queue, tmpQueue...)
+		d.mu.Unlock()
+		d.wg.Done()
+	}()
+	d.wg.Add(1)
+	go func() {
+		tmpQueue := make([]func(), 0, len(oldout))
+		for job := range oldout {
+			tmpQueue = append(tmpQueue, job)
+		}
+		d.mu.Lock()
+		d.queue = append(tmpQueue, d.queue...)
+		d.mu.Unlock()
+		d.wg.Done()
+	}()
+	return d
+}
+
 func (d *Dispatcher) UpScale(workerCount int) *Dispatcher {
+	d.ScaleBuffer(workerCount * 100)
 	d.mu.Lock()
 	d.scaling = true
 	diff := workerCount - len(d.workers)
@@ -153,6 +193,7 @@ func DownScale(workerCount int) *Dispatcher {
 }
 
 func (d *Dispatcher) DownScale(workerCount int) *Dispatcher {
+	d.ScaleBuffer(workerCount * 100)
 	d.mu.Lock()
 	d.scaling = true
 	diff := len(d.workers) - workerCount
