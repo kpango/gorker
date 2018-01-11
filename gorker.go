@@ -136,6 +136,7 @@ func (d *Dispatcher) ScaleBuffer(size int) *Dispatcher {
 	d.mu.Unlock()
 	d.wg.Add(1)
 	go func() {
+		defer d.wg.Done()
 		tmpQueue := make([]func(), 0, len(oldin))
 		for job := range oldin {
 			tmpQueue = append(tmpQueue, job)
@@ -143,10 +144,10 @@ func (d *Dispatcher) ScaleBuffer(size int) *Dispatcher {
 		d.mu.Lock()
 		d.queue = append(d.queue, tmpQueue...)
 		d.mu.Unlock()
-		d.wg.Done()
 	}()
 	d.wg.Add(1)
 	go func() {
+		defer d.wg.Done()
 		tmpQueue := make([]func(), 0, len(oldout))
 		for job := range oldout {
 			tmpQueue = append(tmpQueue, job)
@@ -154,7 +155,6 @@ func (d *Dispatcher) ScaleBuffer(size int) *Dispatcher {
 		d.mu.Lock()
 		d.queue = append(tmpQueue, d.queue...)
 		d.mu.Unlock()
-		d.wg.Done()
 	}()
 	return d
 }
@@ -321,7 +321,6 @@ func (d *Dispatcher) Add(job func() error) chan error {
 	ech := make(chan error, 1)
 	d.wg.Add(1)
 	d.qin <- func() {
-		defer d.wg.Done()
 		ech <- job()
 	}
 	return ech
@@ -374,10 +373,10 @@ func (w *worker) start(ctx context.Context) {
 }
 
 func (w *worker) run(job func()) {
+	defer w.dis.wg.Done()
 	if job != nil {
 		job()
 	}
-	w.dis.wg.Done()
 }
 
 func (w *worker) stop() {
