@@ -126,10 +126,6 @@ func (d *Dispatcher) GetWorkerCount() int {
 	}
 }
 
-func UpScale(workerCount int) *Dispatcher {
-	return instance.UpScale(workerCount)
-}
-
 func (d *Dispatcher) ScaleBuffer(size int) *Dispatcher {
 	size = int(math.Min(float64(size*100), bufferSizeLimit))
 	d.mu.Lock()
@@ -161,6 +157,10 @@ func (d *Dispatcher) ScaleBuffer(size int) *Dispatcher {
 		d.wg.Done()
 	}()
 	return d
+}
+
+func UpScale(workerCount int) *Dispatcher {
+	return instance.UpScale(workerCount)
 }
 
 func (d *Dispatcher) UpScale(workerCount int) *Dispatcher {
@@ -318,9 +318,10 @@ func Add(job func() error) chan error {
 }
 
 func (d *Dispatcher) Add(job func() error) chan error {
-	d.wg.Add(1)
 	ech := make(chan error, 1)
+	d.wg.Add(1)
 	d.qin <- func() {
+		defer d.wg.Done()
 		ech <- job()
 	}
 	return ech
@@ -375,8 +376,8 @@ func (w *worker) start(ctx context.Context) {
 func (w *worker) run(job func()) {
 	if job != nil {
 		job()
-		w.dis.wg.Done()
 	}
+	w.dis.wg.Done()
 }
 
 func (w *worker) stop() {
