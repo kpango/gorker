@@ -4,6 +4,8 @@ import (
 	"context"
 	"math"
 	"sync"
+
+	"github.com/kpango/glg"
 )
 
 type Dispatcher struct {
@@ -72,7 +74,6 @@ func New(maxWorker int) *Dispatcher {
 }
 
 func newDispatcher(maxWorker int) *Dispatcher {
-	ctx, cancel := context.WithCancel(context.Background())
 	qs := 100000
 	return &Dispatcher{
 		running:     false,
@@ -83,8 +84,7 @@ func newDispatcher(maxWorker int) *Dispatcher {
 		wg:          new(sync.WaitGroup),
 		mu:          new(sync.Mutex),
 		workers:     make([]*worker, maxWorker),
-		ctx:         ctx,
-		cancel:      cancel,
+		ctx:         context.Background(),
 	}
 }
 
@@ -304,13 +304,7 @@ func Start() *Dispatcher {
 }
 
 func (d *Dispatcher) Start() *Dispatcher {
-	for i, w := range d.workers {
-		if !w.running {
-			d.workers[i].start(d.ctx)
-		}
-	}
-	d.running = true
-	return d
+	return d.StartWithContext(context.Background())
 }
 
 func Add(job func() error) chan error {
@@ -346,6 +340,7 @@ func (d *Dispatcher) Stop(immediately bool) *Dispatcher {
 	}
 
 	if !immediately {
+		glg.Warn("waiting")
 		d.Wait()
 	}
 
