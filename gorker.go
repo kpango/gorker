@@ -16,7 +16,7 @@ type Dispatcher struct {
 	qin         chan func()
 	qout        chan func()
 	wg          *sync.WaitGroup
-	mu          *sync.Mutex
+	mu          *sync.RWMutex
 	workerCount int
 	workers     []*worker
 	ctx         context.Context
@@ -82,7 +82,7 @@ func newDispatcher(maxWorker int) *Dispatcher {
 		qin:         make(chan func(), int(math.Min(float64(maxWorker*100), bufferSizeLimit))),
 		qout:        make(chan func(), int(math.Min(float64(maxWorker*100), bufferSizeLimit))),
 		wg:          new(sync.WaitGroup),
-		mu:          new(sync.Mutex),
+		mu:          new(sync.RWMutex),
 		workers:     make([]*worker, maxWorker),
 		ctx:         context.Background(),
 	}
